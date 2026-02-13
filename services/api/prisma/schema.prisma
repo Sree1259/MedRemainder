@@ -1,0 +1,428 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  firstName     String   @map("first_name")
+  lastName      String   @map("last_name")
+  avatarUrl     String?  @map("avatar_url")
+  timezone      String   @default("America/New_York")
+  locale        String   @default("en-US")
+  role          UserRole @default(PATIENT)
+  isPremium     Boolean  @default(false) @map("is_premium")
+  weekendMode   Boolean  @default(false) @map("weekend_mode")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  medications      Medication[]
+  healthMeasurements HealthMeasurement[]
+  appointments     Appointment[]
+  deviceTokens     DeviceToken[]
+  familyProfiles   FamilyProfile[]
+  medfriendLinksAsPatient MedfriendLink[] @relation("Patient")
+  medfriendLinksAsCaregiver MedfriendLink[] @relation("Caregiver")
+  subscriptions    Subscription[]
+  doseLogs         DoseLog[]
+  reminders        Reminder[]
+  aiInterventions  AIIntervention[]
+  auditLogs        AuditLog[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model FamilyProfile {
+  id          String    @id @default(uuid())
+  ownerId     String    @map("owner_id")
+  name        String
+  relationship String
+  avatarUrl   String?   @map("avatar_url")
+  dateOfBirth DateTime? @map("date_of_birth")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  owner       User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  medications Medication[]
+
+  @@index([ownerId])
+  @@map("family_profiles")
+}
+
+model Medication {
+  id                String      @id @default(uuid())
+  userId            String      @map("user_id")
+  familyProfileId   String?     @map("family_profile_id")
+  name              String
+  genericName       String?     @map("generic_name")
+  dosage            String
+  form              MedicationForm
+  shape             String?
+  color             String?
+  photoUrl          String?     @map("photo_url")
+  instructions      String?
+  quantityTotal     Int         @map("quantity_total")
+  quantityRemaining Int         @map("quantity_remaining")
+  refillThreshold   Int         @map("refill_threshold")
+  isAsNeeded        Boolean     @default(false) @map("is_as_needed")
+  rxNumber          String?     @map("rx_number")
+  prescriber        String?
+  pharmacyId        String?     @map("pharmacy_id")
+  isActive          Boolean     @default(true) @map("is_active")
+  startDate         DateTime    @map("start_date")
+  endDate           DateTime?   @map("end_date")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyProfile FamilyProfile? @relation(fields: [familyProfileId], references: [id], onDelete: SetNull)
+  pharmacy      Pharmacy?      @relation(fields: [pharmacyId], references: [id])
+  schedules     Schedule[]
+  doseLogs      DoseLog[]
+  refills       Refill[]
+
+  @@index([userId, isActive])
+  @@index([name])
+  @@map("medications")
+}
+
+model Schedule {
+  id              String       @id @default(uuid())
+  medicationId    String       @map("medication_id")
+  scheduleType    ScheduleType @map("schedule_type")
+  timesPerDay     Int          @map("times_per_day")
+  timeSlots       Json         @map("time_slots") // ["08:00","14:00","20:00"]
+  daysOfWeek      Int[]        @map("days_of_week") // [1,3,5] for Mon,Wed,Fri
+  intervalDays    Int?         @map("interval_days")
+  cycleDaysOn     Int?         @map("cycle_days_on")
+  cycleDaysOff    Int?         @map("cycle_days_off")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  // Relations
+  medication Medication @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  reminders  Reminder[]
+
+  @@index([medicationId])
+  @@map("schedules")
+}
+
+model DoseLog {
+  id             String     @id @default(uuid())
+  medicationId   String     @map("medication_id")
+  userId         String     @map("user_id")
+  scheduledTime  DateTime   @map("scheduled_time")
+  action         DoseAction
+  actionTime     DateTime   @map("action_time")
+  notes          String?
+  createdAt      DateTime   @default(now()) @map("created_at")
+
+  // Relations
+  medication Medication @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scheduledTime])
+  @@index([medicationId])
+  @@map("dose_logs")
+}
+
+model Reminder {
+  id           String         @id @default(uuid())
+  scheduleId   String         @map("schedule_id")
+  userId       String         @map("user_id")
+  fireAt       DateTime       @map("fire_at")
+  status       ReminderStatus @default(PENDING)
+  snoozeUntil  DateTime?      @map("snooze_until")
+  attempts     Int            @default(0)
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  // Relations
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([fireAt, status])
+  @@index([userId])
+  @@map("reminders")
+}
+
+model DrugInteraction {
+  id             String           @id @default(uuid())
+  drugARxcui     String           @map("drug_a_rxcui")
+  drugBRxcui     String           @map("drug_b_rxcui")
+  severity       InteractionSeverity
+  description    String
+  recommendation String
+  source         String
+
+  @@index([drugARxcui, drugBRxcui])
+  @@map("drug_interactions")
+}
+
+model HealthMeasurement {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  metricType      String   @map("metric_type") // blood_pressure, glucose, weight, etc.
+  value           Decimal
+  valueSecondary  Decimal? @map("value_secondary") // e.g., diastolic BP
+  unit            String
+  measuredAt      DateTime @map("measured_at")
+  notes           String?
+  source          String   @default("manual") // manual, apple_health, google_fit
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, metricType, measuredAt])
+  @@map("health_measurements")
+}
+
+model MedfriendLink {
+  id           String             @id @default(uuid())
+  patientId    String             @map("patient_id")
+  caregiverId  String?            @map("caregiver_id")
+  inviteEmail  String             @map("invite_email")
+  inviteToken  String             @map("invite_token")
+  status       MedfriendStatus    @default(PENDING)
+  permissions  Json               // {"view_meds": true, "view_health": false}
+  notifyOnMiss Boolean            @default(true) @map("notify_on_miss")
+  createdAt    DateTime           @default(now()) @map("created_at")
+
+  // Relations
+  patient   User  @relation("Patient", fields: [patientId], references: [id], onDelete: Cascade)
+  caregiver User? @relation("Caregiver", fields: [caregiverId], references: [id], onDelete: SetNull)
+
+  @@index([patientId])
+  @@index([caregiverId])
+  @@index([inviteToken])
+  @@map("medfriend_links")
+}
+
+model Appointment {
+  id                    String   @id @default(uuid())
+  userId                String   @map("user_id")
+  title                 String
+  doctorName            String?  @map("doctor_name")
+  location              String?
+  appointmentAt         DateTime @map("appointment_at")
+  reminderMinutesBefore Int      @default(60) @map("reminder_minutes_before")
+  notes                 String?
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, appointmentAt])
+  @@map("appointments")
+}
+
+model Pharmacy {
+  id               String    @id @default(uuid())
+  name             String
+  address          String
+  phone            String
+  apiPartnerId     String?   @map("api_partner_id")
+  supportsDelivery Boolean   @default(false) @map("supports_delivery")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  medications Medication[]
+  refills     Refill[]
+
+  @@map("pharmacies")
+}
+
+model Refill {
+  id          String       @id @default(uuid())
+  medicationId String      @map("medication_id")
+  pharmacyId  String?      @map("pharmacy_id")
+  status      RefillStatus @default(PENDING)
+  requestedAt DateTime     @default(now()) @map("requested_at")
+  fulfilledAt DateTime?    @map("fulfilled_at")
+
+  // Relations
+  medication Medication @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  pharmacy   Pharmacy?  @relation(fields: [pharmacyId], references: [id])
+
+  @@index([medicationId])
+  @@map("refills")
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String
+  platform  Platform
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@unique([userId, token])
+  @@map("device_tokens")
+}
+
+model Subscription {
+  id                     String             @id @default(uuid())
+  userId                 String             @map("user_id")
+  planId                 String             @map("plan_id")
+  provider               PaymentProvider
+  providerSubscriptionId String             @map("provider_subscription_id")
+  status                 SubscriptionStatus
+  currentPeriodStart     DateTime           @map("current_period_start")
+  currentPeriodEnd       DateTime           @map("current_period_end")
+  createdAt              DateTime           @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@index([userId])
+  @@map("subscriptions")
+}
+
+model Plan {
+  id          String    @id @default(uuid())
+  name        String    @unique // free, premium_monthly, premium_yearly
+  priceCents  Int       @map("price_cents")
+  interval    PlanInterval
+  features    Json      // Feature flags
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model AIIntervention {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  type           String   // nudge, encouragement, education, alert
+  content        String
+  triggerReason  String   @map("trigger_reason")
+  wasEffective   Boolean? @map("was_effective")
+  deliveredAt    DateTime @map("delivered_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("ai_interventions")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  changes     Json?
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+// Enums
+enum UserRole {
+  PATIENT
+  CAREGIVER
+  PROVIDER
+  ADMIN
+}
+
+enum MedicationForm {
+  PILL
+  CAPSULE
+  LIQUID
+  INJECTION
+  PATCH
+  INHALER
+  DROPS
+  CREAM
+  OTHER
+}
+
+enum ScheduleType {
+  DAILY
+  SPECIFIC_DAYS
+  INTERVAL
+  CYCLE
+}
+
+enum DoseAction {
+  TAKEN
+  SKIPPED
+  MISSED
+  SNOOZED
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  ACKNOWLEDGED
+  SNOOZED
+  FAILED
+}
+
+enum InteractionSeverity {
+  MINOR
+  MODERATE
+  MAJOR
+  SEVERE
+}
+
+enum MedfriendStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  REVOKED
+}
+
+enum RefillStatus {
+  PENDING
+  ORDERED
+  READY
+  PICKED_UP
+  DELIVERED
+}
+
+enum Platform {
+  IOS
+  ANDROID
+  WEB
+}
+
+enum PaymentProvider {
+  STRIPE
+  APPLE_IAP
+  GOOGLE_PLAY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  PAST_DUE
+  EXPIRED
+}
+
+enum PlanInterval {
+  MONTH
+  YEAR
+}
